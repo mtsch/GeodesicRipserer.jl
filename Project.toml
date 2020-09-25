@@ -1,13 +1,31 @@
 name = "GeodesicRipserer"
 uuid = "3d284cf9-fc84-4766-bd8b-879a1f03cff4"
 authors = ["mtsch <matijacufar@gmail.com>"]
-version = "0.1.0"
+version = "0.1.0-DEV"
 
 [deps]
+Compat = "34da2185-b29b-5c13-b0c7-acf172513d20"
 IterTools = "c8e1da08-722c-5040-9ed9-7db0dc04731e"
 LightGraphs = "093fc24a-ae57-5d10-9952-331d41423f4d"
+NearestNeighbors = "b8a86587-4115-5ab1-83bc-aa920d37bbce"
+PersistenceDiagrams = "90b4794c-894b-4756-a0f8-5efeb5ddf7ae"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Ripserer = "aa79e827-bd0b-42a8-9f10-2b302677a641"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 TupleTools = "9d95972d-f1c8-5527-a6e0-b4b365fa01f6"
+
+[compat]
+Compat = "3.10.0"
+IterTools = "1"
+LightGraphs = "1"
+NearestNeighbors = "0.4"
+ProgressMeter = "1"
+Ripserer = "0.15"
+StaticArrays = "0.12"
+TupleTools = "1"
+julia = "1"
 
 [extras]
 Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"

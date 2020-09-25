@@ -61,6 +61,7 @@ end
     end
 
     @testset "Ex-bug" begin
+        # This used to fail.
         # Example was generated randomly. Full precision is needed to make it fail.
         cycle = cycle_graph(6)
         weights = [
@@ -86,29 +87,37 @@ end
     for m in (2, 5)
         @testset "12×9 torus graph modulus=$m" begin
             torus = torus_graph(12, 9)
-            result = ripserer(GeodesicRips(torus), modulus=m)
+            grips = GeodesicRips(torus)
+            result = ripserer(grips, modulus=m)
 
-            @test result == ripserer(adjacency_matrix(GeodesicRips(torus)), modulus=m)
+            @test result == ripserer(adjacency_matrix(grips), modulus=m)
             @test result[1] == vcat(fill((0, 1), 107), [(0, Inf)])
             @test result[2][1] == (1, 3)
             @test result[2][2] == (1, 4)
+            @test circumference(grips, result[2][1].death_simplex) == 9
+            @test circumference(grips, result[2][2].death_simplex) == 12
         end
     end
 
     @testset "5×7 projective plane graph modulus=2" begin
         plane = projective_graph(5, 7)
+        grips = GeodesicRips(plane)
         result = ripserer(GeodesicRips(plane), dim_max=3)
 
-        @test result == ripserer(adjacency_matrix(GeodesicRips(plane)), dim_max=3)
+        @test result == ripserer(adjacency_matrix(grips), dim_max=3)
         @test length(result[2]) == 2
         @test length(result[3]) == 1
+        @test circumference(grips, result[2][1].death_simplex) == 5
+        @test circumference(grips, result[2][2].death_simplex) == 4
     end
 
     @testset "5×7 projective plane graph modulus=3" begin
         plane = projective_graph(5, 7)
-        result = ripserer(GeodesicRips(plane), modulus=3, dim_max=3)
+        grips = GeodesicRips(plane)
+        result = ripserer(grips, modulus=3, dim_max=3)
 
-        @test result == ripserer(adjacency_matrix(GeodesicRips(plane)), modulus=3, dim_max=3)
+        @test result == ripserer(adjacency_matrix(grips), modulus=3, dim_max=3)
         @test length(result[2]) == 1
+        @test circumference(grips, result[2][1].death_simplex) == 4
     end
 end

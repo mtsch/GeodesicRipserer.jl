@@ -9,24 +9,72 @@ simplex_type(::Type{<:EqRips{I, T}}, D) where {I, T} = ThickSimplex{D, T, I}
 
 emergent_pairs(::EqRips) = false
 
-struct GeodesicRips{I, T, G, A<:AbstractMatrix{T}} <: AbstractRipsFiltration{I, T}
+struct GeodesicRips{I, T, G, A<:AbstractMatrix{T}, P} <: AbstractRipsFiltration{I, T}
     graph::G
     dist::A
     paths::Matrix{Int}
+    points::P
     threshold::T
 end
 
-function GeodesicRips{I}(graph, distmx=weights(graph); threshold=nothing) where I
+function GeodesicRips{I}(
+    graph::AbstractGraph, distmx=weights(graph), points=nothing; threshold=nothing
+) where I
     fw = floyd_warshall_shortest_paths(graph, distmx)
     if isnothing(threshold)
         threshold = radius(fw.dists)
+        if isinf(threshold)
+            error("TODO: space is disconnected.")
+        end
     end
     T = eltype(fw.dists)
-    return GeodesicRips{I, T, typeof(graph), typeof(fw.dists)}(
-        graph, fw.dists, fw.parents, T(threshold)
+    return GeodesicRips{I, T, typeof(graph), typeof(fw.dists), typeof(points)}(
+        graph, fw.dists, fw.parents, points, T(threshold)
     )
 end
 GeodesicRips(args...; kwargs...) = GeodesicRips{Int}(args...; kwargs...)
+
+function GeodesicRips{I}(
+    points::AbstractVector, r1, r2=nothing; metric=Euclidean(), kwargs...
+) where I
+    !isnothing(r2) && r1 > r2 && @warn "you probably want r1 ≤ r2"
+
+    if isnothing(r2)
+        r2 = r1
+    else
+        points = shuffle(points)
+        tree = KDTree(SVector.(points), metric)
+        # Create a subsample of points r1 apart.
+        visited = falses(length(points))
+        new_points = eltype(points)[]
+        for i in eachindex(points)
+            visited[i] && continue
+            push!(new_points, points[i])
+            visited[inrange(tree, SVector(points[i]), r1)] .= true
+        end
+        points = new_points
+    end
+
+    is = Int[]
+    js = Int[]
+    vs = typeof(metric(SVector(points[1]), SVector(points[2])))[]
+    edgelist = Edge{Int}[]
+    tree = KDTree(SVector.(points), metric)
+    for u in eachindex(points)
+        for v in inrange(tree, SVector(points[u]), 2r2)
+            u == v && continue
+            d = metric(SVector(points[u]), SVector(points[v]))
+            append!(is, (u, v))
+            append!(js, (v, u))
+            append!(vs, (d, d))
+            push!(edgelist, Edge(u, v))
+        end
+    end
+    weights = sparse(is, js, vs, length(points), length(points), min)
+    graph = Graph(edgelist)
+
+    return GeodesicRips{I}(graph, weights, points; kwargs...)
+end
 
 adjacency_matrix(gr::GeodesicRips) = gr.dist
 threshold(gr::GeodesicRips) = gr.threshold
@@ -34,9 +82,8 @@ simplex_type(::Type{<:GeodesicRips{I, T}}, D) where {I, T} = ThickSimplex{D, T, 
 
 emergent_pairs(::GeodesicRips) = false
 
-#=
-function _edges(u, vs, adj, r)
-    res = map(vs) do v
+function _edges(u, vxs, adj, r)
+    res = map(vxs) do v
         adj[u, v]
     end
     if maximum(res) ≤ r && minimum(res) > 0
@@ -46,116 +93,42 @@ function _edges(u, vs, adj, r)
     end
 end
 
-function _visit!(stack, vs, visited)
-    for v in vs
-        if !visited[v]
-            push!(stack, v)
-            visited[v] = true
-        end
-    end
-end
-
-function _min_cofacet(grips::GeodesicRips, σ::ThickSimplex)
-    diam = birth(σ)
-    vxs = vertices(σ)
-    starting_vertex = vxs[1]
-    τ = nothing
-
-    # DFS from one of the vertices, only taking vertices that are less than birth(σ)
-    # away from all the others.
-    visited = falses(nv(grips))
-    stack = Int[]
-    _visit!(stack, neighbors(grips.graph, starting_vertex), visited)
-
-    while !isempty(stack)
-        v = pop!(stack)
-        if v in vxs
-            _visit!(stack, neighbors(grips.graph, v), visited)
-        else
-            weights = _edges(v, vxs, grips.dist, diam)
-            if !isnothing(weights)
-                _visit!(stack, neighbors(grips.graph, v), visited)
-                #new_vxs = TupleTools.sort(TupleTools.insertafter(Tuple(vxs), 0, (v,)), rev=true)
-                new_vxs, sign = _signed_insert(Tuple(vxs), v)
-                # Ignore the sign from now, we will get it from the call to boundary.
-                candidate = unsafe_cofacet(grips, σ, new_vxs, v, sign, weights)
-                if isnothing(τ) || !isnothing(candidate) && τ > candidate
-                    τ = candidate
-                end
-            end
-        end
-    end
-    return τ
-end
-
-function find_apparent_pairs(grips::GeodesicRips{<:Any, T}, cols, progress) where T
-    # TODO only works fine for dense grips
-    if true || issparse(adjacency_matrix(grips))
-        return cols, ()
-    end
-    S = eltype(cols)
-    C = simplex_type(grips, dim(S) + 1)
-    cols_left = S[]
-    apparent = Tuple{S, C}[]
-
-    if progress
-        progbar = Progress(length(cols); desc="Finding apparent pairs... ")
-    end
-    for σ in cols
-        τ = _min_cofacet(grips, σ)
-        if isnothing(τ)
-            push!(cols_left, σ)
-        else
-            if σ == maximum(boundary(grips, τ))
-                push!(apparent, (σ, τ))
-            else
-                push!(cols_left, σ)
-            end
-        end
-        progress && next!(progbar)
-    end
-    progress && printstyled(stderr, "$(length(apparent)) apparent pairs.\n", color=:green)
-    return cols_left, apparent
-end
-=#
 function _signed_insert(vertices, vertex)
     n = length(vertices)
     sign = iseven(n) ? 1 : -1
     for i in 0:n-1
         if vertices[i+1] < vertex
-            return TupleTools.insertafter(vertices, i, (vertex,)), sign
+            return TupleTools.insertafter(Tuple(vertices), i, (vertex,)), sign
         end
         sign *= -1
     end
-    return TupleTools.insertafter(vertices, n, (vertex,)), sign
+    return TupleTools.insertafter(Tuple(vertices), n, (vertex,)), sign
 end
 
-function _min_cofacet(grips::GeodesicRips, sx::ThickSimplex{1})
+function _min_cofacet(grips, sx)
     vxs = vertices(sx)
-    u, v = vxs
-    if has_edge(grips.graph, u, v)
+    adj = adjacency_matrix(grips)
+    graph = grips.graph
+    result = nothing
+    for u in vxs
+        for v in neighbors(grips.graph, u)
+            es = _edges(v, vxs, adj, birth(sx))
+            isnothing(es) && continue
+            new_vxs, sign = _signed_insert(vxs, v)
+            candidate = unsafe_cofacet(grips, sx, new_vxs, v, sign, es)
+            if isnothing(result) || candidate < result
+                result = candidate
+            end
+        end
+    end
+    if !isnothing(result) && thickness(result) < thickness(sx)
+        return result
     else
-        w = typemax(eltype(sx))
-        while true
-            u′ = grips.paths[v, u]
-            w = min(w, u′)
-            u′ == v && break
-            u = u′
-        end
-        new_vxs, sign = _signed_insert(Tuple(vxs), w)
-        if w == v || w == typemax(eltype(sx))
-            return nothing
-        else
-            return nothing
-            return unsafe_cofacet(grips, sx, new_vxs, v, sign)
-        end
+        return nothing
     end
 end
 
-
-function find_apparent_pairs(
-    grips::GeodesicRips, columns::AbstractVector{<:ThickSimplex{1}}, progress
-)
+function find_apparent_pairs(grips::GeodesicRips, columns, progress)
     S = eltype(columns)
     C = simplex_type(grips, dim(S) + 1)
     cols_left = S[]
@@ -170,26 +143,41 @@ function find_apparent_pairs(
             if column == maximum(boundary(grips, pivot))
                 push!(apparent, (column, pivot))
             else
-                @show column pivot
-                error()
                 push!(cols_left, column)
             end
         else
             push!(cols_left, column)
         end
-        progress && next!(progbar)
+        progress && next!(
+            progbar, showvalues=((:left, length(cols_left)), (:apparent, length(apparent)))
+        )
     end
-    prog_println(progress, "$(length(apparent)) apparent pairs.")
+    prog_println(progress, fmt_number(length(apparent)), " apparent pairs.")
     return cols_left, apparent
 end
 
-function filling(grips, element::AbstractChainElement)
+function postprocess_diagram(grips::GeodesicRips, diagram)
+    intervals = map(diagram) do interval
+        if isnothing(interval.death_simplex)
+            death_filling = (;death_filling=simplex_type(grips, 1)[])
+        else
+            death_filling = (;death_filling=filling(grips, interval.death_simplex))
+        end
+        birth_filling = (;birth_filling=filling(grips, interval.birth_simplex))
+
+        meta = (;interval.meta..., birth_filling..., death_filling...)
+        return PersistenceInterval(interval.birth, interval.death, meta)
+    end
+    return PersistenceDiagram(intervals, diagram.meta)
+end
+
+function filling(grips::GeodesicRips, element::AbstractChainElement)
     return filling(grips, simplex(element))
 end
 
-function filling(grips, sx::AbstractSimplex)
-    if dim(sx) > 2
-        throw(ArgumentError("currently only dims up to 2 are supported"))
+function filling(grips::GeodesicRips, sx::AbstractSimplex)
+    if dim(sx) == 0
+        return [sx]
     end
     vxs = vertices(sx)
     result = simplex_type(grips, 1)[]
@@ -201,4 +189,8 @@ function filling(grips, sx::AbstractSimplex)
         end
     end
     return result
+end
+
+function circumference(grips::GeodesicRips, sx::AbstractSimplex)
+    sum(birth(e) for e in filling(grips, sx))
 end
